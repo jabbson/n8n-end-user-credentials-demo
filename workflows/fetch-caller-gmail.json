@@ -1,0 +1,209 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "content": "### Identity arrives here\nThe Bearer Token Extractor lifts the caller's access token off the Authorization header into the execution context. A key icon on the Webhook node confirms it is active.\n\nWebhook is the only trigger this extractor supports. Chat and MCP triggers seal the identity instead, which is affected by a known OAuth refresh bug.",
+        "height": 272,
+        "width": 420,
+        "color": 3
+      },
+      "id": "23cd40fb-d452-461e-9df0-ad229084ca44",
+      "name": "Sticky Note Identity",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        656,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Runs as the caller, not as you\nThe Gmail credential needs \"Set up for end-user credentials\" enabled, and this workflow must name your resolver under Settings > Dynamic credential resolver.\n\nn8n maps the caller's subject claim to that person's own stored Google token. There is no fallback to the credential's own account: an unresolved credential fails the node and takes the error branch.",
+        "height": 220,
+        "width": 900,
+        "color": 3
+      },
+      "id": "e57a1778-1b0b-4b8c-8859-c1797acf34e8",
+      "name": "Sticky Note Credential",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        656,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "end-user-gmail",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "52da8b3a-4e04-4bba-96b0-1206f4a309c0",
+      "name": "Receive Call From App",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        656,
+        784
+      ],
+      "webhookId": "5e6890ce-5333-4789-99e2-2c0cfe621e90"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 3,
+        "filters": {
+          "readStatus": "both"
+        }
+      },
+      "id": "9d668e19-ef89-46b0-8800-2ff888c34e0b",
+      "name": "Fetch Callers Recent Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        784
+      ],
+      "webhookId": "d8441559-c918-48d3-8304-617276f1a3b4",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "from",
+              "name": "from",
+              "value": "={{ $json.From }}",
+              "type": "string"
+            },
+            {
+              "id": "subject",
+              "name": "subject",
+              "value": "={{ $json.Subject }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ccbfa0de-5b55-45f1-9eb2-8221e67a72fa",
+      "name": "Keep From And Subject",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1104,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {}
+      },
+      "id": "d923c29f-a0b6-4d61-815b-cab0a14c2aee",
+      "name": "Get Connected Account",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1328,
+        688
+      ],
+      "executeOnce": true,
+      "notes": "Gmail asks for no identity scope, so the stored token carries no email claim. users.getProfile is the only way to learn which account this run authenticated as."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { account: $('Get Connected Account').first().json.emailAddress, messages: $('Keep From And Subject').all().map(item => item.json) } }}",
+        "options": {}
+      },
+      "id": "470097e1-8a64-447e-9c72-a913ca405736",
+      "name": "Return Emails To App",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1552,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"error\":\"gmail_not_connected\",\"message\":\"No Gmail token is stored for this caller. Call the execution-status endpoint and follow the authorizationUrl to connect.\"}",
+        "options": {
+          "responseCode": 424
+        }
+      },
+      "id": "d736b1ee-29a5-4e5d-86f5-00b00ec03088",
+      "name": "Report Gmail Not Connected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1104,
+        880
+      ]
+    }
+  ],
+  "connections": {
+    "Receive Call From App": {
+      "main": [
+        [
+          {
+            "node": "Fetch Callers Recent Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Callers Recent Emails": {
+      "main": [
+        [
+          {
+            "node": "Keep From And Subject",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report Gmail Not Connected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep From And Subject": {
+      "main": [
+        [
+          {
+            "node": "Get Connected Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Connected Account": {
+      "main": [
+        [
+          {
+            "node": "Return Emails To App",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3486f2026da939d09e675603f944f12b01b9e5e47d4e65a422d90222441f6d99"
+  }
+}

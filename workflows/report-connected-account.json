@@ -1,0 +1,122 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "content": "### Why this exists\nGmail requests no identity scope, so the stored OAuth token carries no email claim and n8n has nothing to report. `users.getProfile` is the only way to learn which Google account a caller connected.\n\nKept separate from the main workflow so the credentials page can ask without fetching anybody's mail.",
+        "height": 252,
+        "width": 420,
+        "color": 3
+      },
+      "id": "445db5da-56ac-4e96-bb80-43de126dc6a2",
+      "name": "Sticky Note Why",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        496,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "connected-account",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c6a65fc7-e56a-44a4-9f89-4a99c5e22325",
+      "name": "Ask Who Is Connected",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        544,
+        1024
+      ],
+      "webhookId": "a64a150b-8b7d-49f8-b3f1-69ac4816eb97"
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {}
+      },
+      "id": "f7c51068-6166-4c3e-b724-a72d4024a682",
+      "name": "Read Gmail Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        768,
+        1024
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { account: $json.emailAddress } }}",
+        "options": {}
+      },
+      "id": "749c0a89-91af-4333-8378-e6110e281d94",
+      "name": "Return The Account",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        992,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"error\":\"gmail_not_connected\",\"account\":null}",
+        "options": {
+          "responseCode": 424
+        }
+      },
+      "id": "b2ec9ae1-e9c3-444b-9b19-9bd4c1db273a",
+      "name": "Report Not Connected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        992,
+        1120
+      ]
+    }
+  ],
+  "connections": {
+    "Ask Who Is Connected": {
+      "main": [
+        [
+          {
+            "node": "Read Gmail Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Gmail Profile": {
+      "main": [
+        [
+          {
+            "node": "Return The Account",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report Not Connected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3486f2026da939d09e675603f944f12b01b9e5e47d4e65a422d90222441f6d99"
+  }
+}

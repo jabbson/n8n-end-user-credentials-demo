@@ -1,0 +1,20 @@
+{
+  "name": "n8n-dynamic-creds-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal third-party app that authenticates a user against Okta and calls an n8n workflow that uses dynamic credentials",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --env-file=.env src/index.js",
+    "dev": "node --env-file=.env --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-session": "^1.18.1",
+    "openid-client": "^6.8.7"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
