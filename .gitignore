@@ -19,3 +19,8 @@ Thumbs.db
 .vscode/
 *.swp
 .vercel
+
+# Agent skills dropped in by `vercel install`; not part of this example
+.agents/
+.claude/
+skills-lock.json
