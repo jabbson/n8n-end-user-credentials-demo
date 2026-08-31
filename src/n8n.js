@@ -38,14 +38,34 @@ async function parse(res) {
 }
 
 /**
+ * Every call here crosses the network to an n8n instance that might be down, mid-restart,
+ * or simply slow. Without a deadline a hung n8n holds the request open until the platform
+ * kills it — 300s on Vercel — which during a demo looks like the app itself having frozen.
+ * The timeout message names the call, because "the operation was aborted" does not.
+ */
+async function timedFetch(url, options, ms, what) {
+	try {
+		return await fetch(url, { ...options, signal: AbortSignal.timeout(ms) });
+	} catch (error) {
+		if (error.name === 'TimeoutError') {
+			throw new Error(`${what} did not respond within ${ms / 1000}s. Is n8n reachable?`);
+		}
+		throw error;
+	}
+}
+
+/**
  * Is this workflow runnable *for this caller*? Returns readyToExecute plus, for each
  * dynamic credential, a per-credential status of missing | configured |
  * resolver_missing and the URLs to authorize or revoke it.
  */
 export async function getExecutionStatus(accessToken) {
-	const res = await fetch(`${baseUrl}/rest/workflows/${workflowId}/execution-status`, {
-		headers: headers(accessToken),
-	});
+	const res = await timedFetch(
+		`${baseUrl}/rest/workflows/${workflowId}/execution-status`,
+		{ headers: headers(accessToken) },
+		15_000,
+		'Checking execution status',
+	);
 	return await parse(res);
 }
 
@@ -56,31 +76,44 @@ export async function getExecutionStatus(accessToken) {
  */
 export async function requestAuthorizationUrl(accessToken, authorizationUrl) {
 	assertSameInstance(authorizationUrl);
-	const res = await fetch(authorizationUrl, {
-		method: 'POST',
-		headers: headers(accessToken),
-	});
+	const res = await timedFetch(
+		authorizationUrl,
+		{ method: 'POST', headers: headers(accessToken) },
+		15_000,
+		'Requesting the consent URL',
+	);
 	return await parse(res);
 }
 
 /** Drop this caller's stored provider tokens for one credential. */
 export async function revoke(accessToken, revokeUrl) {
 	assertSameInstance(revokeUrl);
-	const res = await fetch(revokeUrl, { method: 'DELETE', headers: headers(accessToken) });
+	const res = await timedFetch(
+		revokeUrl,
+		{ method: 'DELETE', headers: headers(accessToken) },
+		15_000,
+		'Disconnecting the credential',
+	);
 	if (!res.ok && res.status !== 204) await parse(res);
 }
 
 /** Fire the workflow itself. Same bearer token, so the run happens as this user. */
 export async function callWebhook(accessToken, payload) {
-	const res = await fetch(webhookUrl, {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			'Content-Type': 'application/json',
-			Accept: 'application/json',
+	const res = await timedFetch(
+		webhookUrl,
+		{
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				'Content-Type': 'application/json',
+				Accept: 'application/json',
+			},
+			body: JSON.stringify(payload ?? {}),
 		},
-		body: JSON.stringify(payload ?? {}),
-	});
+		// Longer than the rest: this one runs the workflow, which reads a mailbox.
+		60_000,
+		'Running the workflow',
+	);
 	const text = await res.text();
 	let body;
 	try {

@@ -19,7 +19,7 @@ export const config = {
  * endpoint below (authorize, token, introspect) comes from Okta rather than being
  * hardcoded here. Same document n8n's resolver reads.
  */
-export const oidc = await client.discovery(
+const oidc = await client.discovery(
 	new URL(config.issuer),
 	config.clientId,
 	config.clientSecret,
@@ -146,6 +146,7 @@ export async function introspect(token) {
 			Authorization: `Basic ${basic}`,
 		},
 		body: new URLSearchParams({ token, token_type_hint: 'access_token' }),
+		signal: AbortSignal.timeout(10_000),
 	});
 
 	return await res.json();

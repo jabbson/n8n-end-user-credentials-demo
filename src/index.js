@@ -20,7 +20,6 @@ import {
 import {
 	banner,
 	chain,
-	copyButton,
 	escapeHtml,
 	facts,
 	logo,
@@ -474,23 +473,23 @@ app.post('/revoke', requireAuth, async (req, res, next) => {
 // Run
 // --------------------------------------------------------------------------
 
+/** Both /run routes need the same guard, and it renders its own page when it trips. */
+const requireWebhookUrl = (req, res, next) =>
+	renderIfUnconfigured(req, res, {
+		varName: 'N8N_WEBHOOK_URL',
+		value: n8n.webhookUrl,
+		where: "The workflow's production webhook URL, from the Webhook trigger node.",
+		active: '/run',
+	})
+		? undefined
+		: next();
+
 const runButton = (label) =>
 	`<form method="post" action="/run" data-busy>
      <button class="primary" data-busy-label="Reading your mail">${label}</button>
    </form>`;
 
-app.get('/run', requireAuth, (req, res) => {
-	if (
-		renderIfUnconfigured(req, res, {
-			varName: 'N8N_WEBHOOK_URL',
-			value: n8n.webhookUrl,
-			where: "The workflow's production webhook URL, from the Webhook trigger node.",
-			active: '/run',
-		})
-	) {
-		return;
-	}
-
+app.get('/run', requireAuth, requireWebhookUrl, (req, res) => {
 	res.send(
 		page({
 			title: 'Run workflow',
@@ -505,18 +504,7 @@ app.get('/run', requireAuth, (req, res) => {
 	);
 });
 
-app.post('/run', requireAuth, async (req, res, next) => {
-	if (
-		renderIfUnconfigured(req, res, {
-			varName: 'N8N_WEBHOOK_URL',
-			value: n8n.webhookUrl,
-			where: "The workflow's production webhook URL, from the Webhook trigger node.",
-			active: '/run',
-		})
-	) {
-		return;
-	}
-
+app.post('/run', requireAuth, requireWebhookUrl, async (req, res, next) => {
 	try {
 		const result = await n8n.callWebhook(req.session.auth.accessToken, { source: 'demo-app' });
 		const emails = Array.isArray(result.body?.messages) ? result.body.messages : null;
