@@ -244,6 +244,41 @@ Open <http://localhost:3000>.
 First run, `/status` shows the credential as `missing`. Connect it, complete the Google
 consent, and it flips to `connected`. Then `/run` returns your own mail.
 
+## Deploying it somewhere
+
+Local is the intended way to run this. If you do want it on a URL, the repo is set up for
+Vercel — `src/index.js` exports the app, so Vercel's Express preset picks it up with no
+`api/` directory and no routing config. Three things are not optional:
+
+**Sessions need Redis.** Serverless invocations do not share memory, so the default
+in-memory store loses the PKCE state written by `/login` before `/callback` reads it. Set
+`REDIS_URL` (Upstash's free tier is ample) and the app uses it; leave it empty and you get
+the in-memory store, which is correct for a single local process. The failure mode without
+it is nasty: instances are sometimes reused, so sign-in works while you are clicking
+quickly and loops forever after a pause.
+
+**`APP_BASE_URL` must be the deployed https URL**, with no trailing slash, and the
+identity provider needs `<APP_BASE_URL>/callback` and `<APP_BASE_URL>/signed-out` added to
+its redirect URIs. Keep the localhost pair registered so local runs still work. The value
+is read once at startup, so changing it requires a redeploy, not just an env update.
+
+**`PORT` is ignored** by any host that assigns its own.
+
+Two things that trip people up but are already handled: `app.set('trust proxy', 1)` is set,
+without which express-session silently refuses to send a `secure` cookie behind a
+TLS-terminating proxy and you get the same endless login loop; and stack traces are
+suppressed when `VERCEL_ENV=production`, because they leak absolute paths, the n8n base URL
+and raw n8n response bodies.
+
+Note that on Vercel's Hobby plan production URLs cannot be access-protected — only preview
+deployments can. Everything here sits behind the identity provider regardless, but this app
+has no CSRF protection on its internal forms and is not written to be internet-facing.
+
+A container host (Render, Fly, Railway) is the lower-friction alternative: it needs no
+Redis for a single instance, though sessions then die on every restart. It does still need
+`trust proxy`, and `npm start` has to drop `--env-file=.env`, since there is no `.env` in
+the image.
+
 ## Things that are easy to get wrong
 
 **A missing credential fails the run.** There is no silent fallback to the credential's own
@@ -284,12 +319,15 @@ src/n8n.js      the n8n calls, and the two auth headers they carry
 src/views.js    layout, styles, client-side behaviour
 workflows/      importable n8n workflows
 public/logo/    service marks
+vercel.json     cache headers for the logos; no routing config needed
 ```
 
 ## Not production code
 
-This is a demo. Sessions are in memory, there is no CSRF protection on the internal forms,
-tokens live in the session cookie store, and errors render stack traces. It is built to
-make the credential flow legible, not to be deployed.
+This is a demo. Sessions are in memory unless you set `REDIS_URL`, there is no CSRF
+protection on the internal forms, tokens live in the session store, and errors render stack
+traces outside production. It is built to make the credential flow legible, not to be
+deployed — the section above exists because "not to be deployed" and "impossible to deploy"
+are different things, not because deploying it is a good idea.
 
 Logos belong to their respective owners and are included for illustration.

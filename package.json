@@ -10,9 +10,11 @@
     "dev": "node --env-file=.env --watch src/index.js"
   },
   "dependencies": {
+    "connect-redis": "^10.0.0",
     "express": "^5.1.0",
     "express-session": "^1.18.1",
-    "openid-client": "^6.8.7"
+    "openid-client": "^6.8.7",
+    "redis": "^6.2.1"
   },
   "engines": {
     "node": ">=22"

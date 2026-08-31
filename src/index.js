@@ -1,5 +1,10 @@
+import { join } from 'node:path';
+
 import express from 'express';
 import session from 'express-session';
+
+import { RedisStore } from 'connect-redis';
+import { createClient } from 'redis';
 
 import * as n8n from './n8n.js';
 import {
@@ -34,14 +39,58 @@ const baseUrl = process.env.APP_BASE_URL ?? `http://localhost:${port}`;
 // which claim actually becomes the storage key. It is display-only — n8n decides.
 const subjectClaim = process.env.SUBJECT_CLAIM ?? 'uid';
 
-app.use('/logo', express.static('public/logo', { maxAge: '1h', immutable: false }));
+/**
+ * Behind a TLS-terminating proxy (Vercel, and every container host) the connection into
+ * this process is plain HTTP; only `x-forwarded-proto` remembers it was HTTPS. Without
+ * this, `req.secure` is false, and express-session refuses to emit Set-Cookie for a
+ * `secure` cookie — silently. The symptom is an endless /login -> Okta -> /callback ->
+ * /login loop with nothing in the logs.
+ */
+app.set('trust proxy', 1);
+
+/**
+ * Serverless invocations do not share a heap, so the default MemoryStore loses the PKCE
+ * state written by /login before /callback reads it. Instances are sometimes reused, which
+ * makes that failure intermittent rather than absent — do not rely on it.
+ *
+ * No REDIS_URL (the normal local case) falls back to MemoryStore, exactly as before.
+ */
+const redisUrl = process.env.REDIS_URL;
+const sessionStore = redisUrl
+	? new RedisStore({
+			client: await createClient({ url: redisUrl }).connect(),
+			prefix: 'n8n-dyncreds:',
+		})
+	: undefined;
+
+/**
+ * Local runs need this. Deployed on Vercel it is inert — public/ is served from the CDN
+ * and express.static is ignored — but public/logo/x.png maps to the same /logo/x.png URL
+ * either way, so one line covers both. The path is absolute because a relative one
+ * resolves against process.cwd(), which is not guaranteed to be the repo root.
+ */
+app.use(
+	'/logo',
+	express.static(join(import.meta.dirname, '..', 'public', 'logo'), {
+		maxAge: '1h',
+		immutable: false,
+	}),
+);
 app.use(express.urlencoded({ extended: false }));
 app.use(
 	session({
+		store: sessionStore,
 		secret: process.env.SESSION_SECRET ?? 'dev-only-insecure-secret',
 		resave: false,
 		saveUninitialized: false,
-		cookie: { httpOnly: true, sameSite: 'lax', secure: baseUrl.startsWith('https://') },
+		cookie: {
+			httpOnly: true,
+			sameSite: 'lax',
+			secure: baseUrl.startsWith('https://'),
+			// With a store, an unset maxAge means a Redis key with no TTL, so keys would
+			// accumulate forever.
+			maxAge: 8 * 60 * 60 * 1000,
+		},
 	}),
 );
 
@@ -77,7 +126,8 @@ function renderIfUnconfigured(req, res, { varName, value, where, active }) {
 				banner('warn', `<strong>${escapeHtml(varName)}</strong> is not set in <code>.env</code>.`) +
 				`<p>${escapeHtml(where)}</p>
          <p class="lede">Restart the app after editing <code>.env</code>.
-         <code>npm start</code> reads it once at boot; <code>npm run dev</code> reloads.</p>`,
+         <code>npm start</code> reads it once at boot; <code>npm run dev</code> reloads.
+         Deployed, env vars live in project settings and a change needs a redeploy.</p>`,
 		}),
 	);
 	return true;
@@ -559,17 +609,28 @@ app.use((error, req, res, _next) => {
 		page({
 			title: 'Something broke',
 			user: userLabel(req),
+			// The stack carries absolute paths, the n8n base URL and raw n8n response
+			// bodies, so it stays out of the page once deployed. console.error above still
+			// puts the full stack in the platform logs.
 			body:
 				banner('err', escapeHtml(error.message)) +
-				`<h2>Stack</h2><div class="token">${escapeHtml(error.stack ?? '')}</div>`,
+				(process.env.VERCEL_ENV === 'production'
+					? ''
+					: `<h2>Stack</h2><div class="token">${escapeHtml(error.stack ?? '')}</div>`),
 		}),
 	);
 });
 
-app.listen(port, () => {
-	console.log(`\n  Demo app   ${baseUrl}`);
-	console.log(`  Okta       ${config.issuer}`);
-	console.log(`  n8n        ${process.env.N8N_BASE_URL}`);
-	console.log(`  Workflow   ${n8n.workflowId || '(N8N_WORKFLOW_ID not set)'}`);
-	console.log(`  Subject    ${subjectClaim}\n`);
-});
+export default app;
+
+// Vercel imports the default export and manages the port itself; the banner is only
+// useful for a local run.
+if (!process.env.VERCEL) {
+	app.listen(port, () => {
+		console.log(`\n  Demo app   ${baseUrl}`);
+		console.log(`  Okta       ${config.issuer}`);
+		console.log(`  n8n        ${process.env.N8N_BASE_URL}`);
+		console.log(`  Workflow   ${n8n.workflowId || '(N8N_WORKFLOW_ID not set)'}`);
+		console.log(`  Subject    ${subjectClaim}\n`);
+	});
+}
